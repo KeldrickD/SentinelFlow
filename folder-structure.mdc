@@ -1,0 +1,17 @@
+sentinelflow/
+├── contracts/
+│   ├── OpsTarget.sol
+│   ├── DecisionJournal.sol
+│   └── deploy/
+├── workflow/
+│   ├── signals/
+│   ├── policies/
+│   ├── actions/
+│   ├── journal/
+│   ├── config/
+│   └── main.ts
+├── apps/
+│   └── cli/
+├── tests/
+├── README.md
+└── DEMO.md

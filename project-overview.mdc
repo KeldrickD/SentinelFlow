@@ -1,0 +1,15 @@
+# SentinelFlow — Project Overview
+
+SentinelFlow is an autonomous onchain operations engine built using the Chainlink Runtime Environment (CRE).
+
+It monitors onchain and offchain signals, evaluates policy rules, and executes deterministic onchain actions with full audit logging.
+
+Primary use cases:
+- Risk management
+- Contract pausing
+- Treasury controls
+- Automated ops workflows
+
+SentinelFlow is not a DAO.
+SentinelFlow is not an AI decision-maker.
+SentinelFlow is a deterministic infrastructure runtime.

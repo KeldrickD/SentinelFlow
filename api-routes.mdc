@@ -1,0 +1,12 @@
+# API Routes
+
+SentinelFlow exposes read-only APIs only.
+
+Examples:
+- GET /status
+- GET /last-decision
+- GET /policies
+
+No write endpoints.
+No execution endpoints.
+All execution happens via CRE.
