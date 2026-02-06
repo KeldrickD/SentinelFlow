@@ -1,0 +1,10 @@
+# Form Handling
+
+SentinelFlow does not accept arbitrary user input.
+
+All configuration is:
+- JSON-based
+- versioned
+- validated at startup
+
+No runtime mutation of policy config is allowed.

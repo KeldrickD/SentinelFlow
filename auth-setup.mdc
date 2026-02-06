@@ -1,0 +1,7 @@
+# Authentication & Authorization
+
+- CRE workflow address is the sole executor
+- OpsTarget enforces allowlisted caller
+- No EOAs execute ops directly
+- No private keys embedded in code
+- All auth is explicit and onchain

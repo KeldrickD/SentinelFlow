@@ -1,0 +1,8 @@
+# Style Guide
+
+- Prefer explicit names over abbreviations
+- No magic numbers
+- No implicit behavior
+- No side effects without logs
+- All errors must be handled
+- Comments explain WHY, not WHAT
