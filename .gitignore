@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Hardhat
+artifacts/
+cache/
+typechain-types/
+coverage/
+coverage.json
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Gas reporter
+gasReporterOutput.json
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Build / logs
+dist/
+*.log
+npm-debug.log*
