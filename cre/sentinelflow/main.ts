@@ -12,7 +12,7 @@ import {
   type Runtime,
   type HTTPPayload,
 } from "@chainlink/cre-sdk";
-import { createPublicClient, http } from "viem";
+import { createPublicClient, http, keccak256, stringToHex } from "viem";
 import { baseSepolia } from "viem/chains";
 import { aiSuggest, type AiSuggestion } from "./aiAdvisor";
 
@@ -33,6 +33,7 @@ type Config = {
   feedAddressEthUsd?: string;
   baselinePriceUsd?: string;
   executionMode?: ExecutionMode | unknown;
+  policyVersion?: string;
 };
 
 type RequestBody = {
@@ -58,6 +59,24 @@ const AGGREGATOR_V3_ABI = [
     ],
   },
 ] as const;
+
+function stableStringify(obj: unknown): string {
+  if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
+  if (Array.isArray(obj)) return `[${obj.map(stableStringify).join(",")}]`;
+  const keys = Object.keys(obj as object).sort();
+  return `{${keys.map((k) => JSON.stringify(k) + ":" + stableStringify((obj as Record<string, unknown>)[k])).join(",")}}`;
+}
+
+function loadPolicyFile(baseDir: string, policyVersion: string): Record<string, unknown> {
+  const filePath = path.join(baseDir, "policies", `policy.${policyVersion}.json`);
+  const raw = fs.readFileSync(filePath, "utf-8");
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+function computePolicyHash(policyObj: Record<string, unknown>): `0x${string}` {
+  const canonical = stableStringify(policyObj);
+  return keccak256(stringToHex(canonical));
+}
 
 function validateConfig(config: Config): void {
   if (!config.receiver || typeof config.receiver !== "string") {
@@ -138,6 +157,23 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
   const body = decodeJson(payload.input) as RequestBody;
   const rpcUrl = process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org";
 
+  const baseDir =
+    typeof import.meta !== "undefined" && (import.meta as { dir?: string }).dir
+      ? (import.meta as { dir: string }).dir
+      : process.cwd();
+  const policyVersion = (config.policyVersion ?? "v0") as string;
+  let policy: Record<string, unknown>;
+  try {
+    policy = loadPolicyFile(baseDir, policyVersion);
+  } catch {
+    policy = {
+      policyId: POLICY_ID,
+      thresholds: { riskBps: config.deviationBpsThreshold, pauseBps: config.pauseBpsThreshold },
+      version: policyVersion,
+    };
+  }
+  const policyHash = computePolicyHash(policy);
+
   let deviationBps = Number(body?.deviationBps ?? 0);
   let meta: Record<string, unknown> = body?.meta ?? {};
   let signalValue = deviationBps;
@@ -192,6 +228,8 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
     ...(Object.keys(meta).length ? meta : {}),
     executionMode,
     ...(shadowAction ? { shadowAction } : {}),
+    policyVersion,
+    policyHash,
   };
   const incidentBundle: Record<string, unknown> = {
     decisionId,
@@ -205,6 +243,9 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
       risk: config.deviationBpsThreshold,
       pause: config.pauseBpsThreshold,
     },
+    policyVersion,
+    policyHash,
+    policySnapshot: policy,
     meta: Object.keys(metaOut).length ? metaOut : null,
     reason: reasonForLog,
     txHash: null,
@@ -228,6 +269,8 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
     reason: reasonForLog,
     executionMode,
     ...(shadowAction ? { shadowAction } : {}),
+    policyVersion,
+    policyHash,
     ai,
     incidentPath,
     incidentBundle: incidentPath ? { decisionId, path: incidentPath } : null,

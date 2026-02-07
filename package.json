@@ -12,7 +12,9 @@
     "status:base": "hardhat run scripts/status.ts --network baseSepolia",
     "health:base": "hardhat run scripts/health.ts --network baseSepolia",
     "decisions:base": "hardhat run scripts/decisions.ts --network baseSepolia",
-    "verify:base": "hardhat run scripts/verify-tx.ts --network baseSepolia"
+    "verify:base": "hardhat run scripts/verify-tx.ts --network baseSepolia",
+    "runbook:base": "hardhat run scripts/ops-runbook.ts --network baseSepolia",
+    "export:base": "hardhat run scripts/export-incident.ts --network baseSepolia"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.0.2"

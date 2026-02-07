@@ -78,7 +78,7 @@ npx hardhat run scripts/decisions.ts --network baseSepolia
 npx hardhat run scripts/health.ts --network baseSepolia
 ```
 
-Or use package scripts: `npm run status:base`, `npm run health:base`, `npm run decisions:base`. Health prints a JSON verdict (OK/WARN/ALERT), last decision, and a suggested next step. To verify a tx’s DecisionLogged determinism: `TX_HASH=0x... npx hardhat run scripts/verify-tx.ts --network baseSepolia` (or `npm run verify:base` with `TX_HASH` set). Defaults use the deployed addresses above; override with env vars.
+Or use package scripts: `npm run status:base`, `npm run health:base`, `npm run decisions:base`. Health prints a JSON verdict (OK/WARN/ALERT), last decision, and a suggested next step. To verify a tx’s DecisionLogged determinism: `TX_HASH=0x... npx hardhat run scripts/verify-tx.ts --network baseSepolia` (or `npm run verify:base` with `TX_HASH` set). Ops runbook: `npm run runbook:base`. Export incident to JSON: `TX_HASH=0x... npm run export:base`. Defaults use the deployed addresses above; override with env vars.
 
 ## Live Demo Proof (Base Sepolia)
 

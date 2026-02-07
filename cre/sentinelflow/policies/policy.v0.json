@@ -1,0 +1,11 @@
+{
+  "policyId": "SENTINELFLOW_POLICY_V0",
+  "description": "SentinelFlow default thresholds for price deviation policy.",
+  "signalType": "PRICE_DEVIATION_BPS",
+  "thresholds": {
+    "riskBps": 250,
+    "pauseBps": 700
+  },
+  "cooldownSeconds": 60,
+  "version": "v0"
+}

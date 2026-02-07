@@ -60,6 +60,8 @@ Payload files in `sentinelflow/`: `payload-a.json` (NO_ACTION), `payload-b.json`
 - **PRICE_FEED mode** — In `config.staging.json` set `"signalMode": "PRICE_FEED"` and provide `feedAddressEthUsd` (Base Sepolia ETH/USD) and `baselinePriceUsd` (8 decimals). The workflow then reads the Chainlink feed and computes deviation in bps instead of using HTTP payload. Keep `"signalMode": "HTTP"` for demos with manual payloads.
 - **executionMode: DRY_RUN | EXECUTE** — If `"executionMode": "DRY_RUN"`, the workflow still computes the action and writes the incident bundle (including `actionTypeComputed`, `shadowAction`), but the report is sent with `actionType: "NO_ACTION"` so nothing is executed onchain. Use for “monitor in prod without acting.”
 
+- **Policy manifest + policyHash** — Policy files in `sentinelflow/policies/` (e.g. `policy.v0.json`); workflow computes `policyHash = keccak256(canonicalJson(policy))` and includes it in meta, incident bundle, and response. Set `config.policyVersion` (default `"v0"`) to load another policy file.
+
 ## Windows: paths with spaces
 
 If your project path has spaces (e.g. `...\Keldrick Dickey\...`), the CRE SDK’s compile step can fail. This repo **patches** `node_modules/@chainlink/cre-sdk` so that:
