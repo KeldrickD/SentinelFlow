@@ -1,0 +1,24 @@
+# CRE workflow config. Target names must match project.yaml targets.
+# Simulate: cre workflow simulate sentinelflow --target staging-settings
+
+staging-settings:
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia-base-1
+      url: https://sepolia.base.org
+  user-workflow:
+    workflow-name: sentinelflow-staging
+  workflow-artifacts:
+    workflow-path: ./main.ts
+    config-path: ./config.staging.json
+    secrets-path: ""
+
+production-settings:
+  rpcs:
+    - chain-name: ethereum-testnet-sepolia-base-1
+      url: https://sepolia.base.org
+  user-workflow:
+    workflow-name: sentinelflow-production
+  workflow-artifacts:
+    workflow-path: ./main.ts
+    config-path: ./config.production.json
+    secrets-path: ""

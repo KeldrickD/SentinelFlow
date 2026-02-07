@@ -1,0 +1,12 @@
+# SentinelFlow CRE project root. Run: cre workflow simulate ./sentinelflow -T staging-settings
+# From this directory (cre/). RPC required so simulator can register EVM capability.
+
+targets:
+  staging-settings:
+    rpcs:
+      - chain-name: ethereum-testnet-sepolia-base-1
+        url: https://sepolia.base.org
+  production-settings:
+    rpcs:
+      - chain-name: ethereum-testnet-sepolia-base-1
+        url: https://sepolia.base.org
