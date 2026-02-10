@@ -8,7 +8,7 @@
   },
   "scripts": {
     "test": "hardhat test",
-    "compile": "hardhat compile",
+    "compile": "hardhat compile && node scripts/index.js",
     "status:base": "hardhat run scripts/status.ts --network baseSepolia",
     "health:base": "hardhat run scripts/health.ts --network baseSepolia",
     "decisions:base": "hardhat run scripts/decisions.ts --network baseSepolia",

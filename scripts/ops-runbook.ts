@@ -29,7 +29,7 @@ async function main() {
   const journalAddr =
     process.env.DECISION_JOURNAL_ADDRESS ?? "0x1e67FB0b1f763f1A89F6D6DaDf165bE8F2Cfc60E";
 
-  const lookback = Number(process.env.LOOKBACK_BLOCKS ?? "20000");
+  const lookback = Number(process.env.LOOKBACK_BLOCKS ?? "9");
   const limit = Number(process.env.LIMIT ?? "5");
 
   const net = await ethers.provider.getNetwork();
@@ -69,8 +69,9 @@ async function main() {
 
   const latest = await ethers.provider.getBlockNumber();
   const fromBlock = Math.max(0, latest - lookback);
+  const toBlock = Math.min(latest, fromBlock + lookback);
 
-  const events = await journal.queryFilter(journal.filters.DecisionLogged(), fromBlock, "latest");
+  const events = await journal.queryFilter(journal.filters.DecisionLogged(), fromBlock, toBlock);
   const recent = events.slice(-limit);
 
   for (const ev of recent.reverse()) {

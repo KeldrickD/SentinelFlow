@@ -68,11 +68,12 @@ async function main() {
     // ignore
   }
 
-  const lookback = Number(process.env.LOOKBACK_BLOCKS ?? "20000");
+  const lookback = Number(process.env.LOOKBACK_BLOCKS ?? "9");
   const latest = await ethers.provider.getBlockNumber();
   const fromBlock = Math.max(0, latest - lookback);
+  const toBlock = Math.min(latest, fromBlock + lookback);
 
-  const events = await journal.queryFilter(journal.filters.DecisionLogged(), fromBlock, "latest");
+  const events = await journal.queryFilter(journal.filters.DecisionLogged(), fromBlock, toBlock);
   const last = events[events.length - 1];
 
   if (last?.args) {
