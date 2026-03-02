@@ -15,6 +15,18 @@ CRE (offchain)  →  Forwarder  →  SentinelFlowReceiver  →  DecisionJournal 
 - **OpsTarget**: Protected contract. Exposes `setRiskMode(uint8)` and `pause()`; only callable by the receiver (executor).
 - **DecisionJournal**: Append-only audit log. Every decision is logged (including NO_ACTION and COOLDOWN_BLOCKED).
 
+## CRE & AI Track Compliance
+
+This project qualifies for **CRE & AI** by integrating a CRE workflow with **blockchain** (Base Sepolia) and **AI** (OpenAI or x402-paid AI Gateway). The workflow supports `aiMode: STUB | LLM | GATEWAY`; with `LLM`, it calls OpenAI for a suggested action and applies a **guardrail** (e.g. `DEESCALATE_ONLY`) so the executed action never exceeds the policy maximum. Optional **AI Gateway** (`ai-gateway/`) exposes `POST /analyze` behind an x402 payment header.
+
+**Chainlink / CRE files (for judge review):**
+
+- [cre/sentinelflow/main.ts](cre/sentinelflow/main.ts) — CRE workflow (HTTP trigger, policy, AI, guardrail, incident bundle)
+- [cre/sentinelflow/workflow.yaml](cre/sentinelflow/workflow.yaml) — CRE workflow config
+- [cre/project.yaml](cre/project.yaml) — CRE project targets (Base Sepolia)
+- [cre/sentinelflow/aiAdvisor.ts](cre/sentinelflow/aiAdvisor.ts) — Stub AI (deterministic)
+- [cre/sentinelflow/aiLLM.ts](cre/sentinelflow/aiLLM.ts) — OpenAI-compatible LLM call + guardrail
+
 ## Setup
 
 ### Environment

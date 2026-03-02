@@ -15,6 +15,7 @@ import {
 import { createPublicClient, http, keccak256, stringToHex } from "viem";
 import { baseSepolia } from "viem/chains";
 import { aiSuggest, type AiSuggestion } from "./aiAdvisor";
+import { aiSuggestLLM, applyGuardrail, type AiSuggestionLLM } from "./aiLLM";
 
 type ExecutionMode = "EXECUTE" | "DRY_RUN";
 
@@ -34,6 +35,12 @@ type Config = {
   baselinePriceUsd?: string;
   executionMode?: ExecutionMode | unknown;
   policyVersion?: string;
+  aiMode?: "STUB" | "LLM" | "GATEWAY";
+  aiPolicy?: "DEESCALATE_ONLY" | "ADVISORY_ONLY";
+  aiEndpoint?: string;
+  aiModel?: string;
+  aiTimeoutMs?: number;
+  aiMaxTokens?: number;
 };
 
 type RequestBody = {
@@ -195,23 +202,75 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
   const reason = String(body?.reason ?? "");
   const actionType = computeAction(deviationBps, config);
   const executionMode = normalizeExecutionMode(config.executionMode);
-  let finalActionType: ActionType = actionType;
+  const aiPolicy = (config.aiPolicy ?? "DEESCALATE_ONLY") as "DEESCALATE_ONLY" | "ADVISORY_ONLY";
+
+  let ai: AiSuggestion | AiSuggestionLLM;
+  const aiMode = (config.aiMode ?? "STUB") as "STUB" | "LLM" | "GATEWAY";
+  if (aiMode === "LLM") {
+    ai = await aiSuggestLLM({
+      deviationBps,
+      riskThreshold: Number(config.deviationBpsThreshold),
+      pauseThreshold: Number(config.pauseBpsThreshold),
+      signalType: SIGNAL_TYPE,
+      executionMode,
+      endpoint: config.aiEndpoint,
+      apiKey: process.env.OPENAI_API_KEY ?? process.env.AI_API_KEY,
+      model: config.aiModel,
+      timeoutMs: config.aiTimeoutMs,
+      maxTokens: config.aiMaxTokens,
+    });
+  } else if (aiMode === "GATEWAY" && config.aiEndpoint) {
+    const gatewayPayload = {
+      deviationBps,
+      riskThreshold: config.deviationBpsThreshold,
+      pauseThreshold: config.pauseBpsThreshold,
+      signalType: SIGNAL_TYPE,
+      executionMode,
+    };
+    const x402Token = process.env.X402_PAYMENT_TOKEN;
+    const res = await fetch(config.aiEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(x402Token ? { "x402-payment": x402Token } : {}),
+      },
+      body: JSON.stringify(gatewayPayload),
+    });
+    if (!res.ok) {
+      if (res.status === 402) {
+        runtime.log("AI Gateway returned 402 Payment Required (x402); falling back to stub");
+      }
+      ai = aiSuggest({
+        deviationBps,
+        riskThreshold: Number(config.deviationBpsThreshold),
+        pauseThreshold: Number(config.pauseBpsThreshold),
+        signalType: SIGNAL_TYPE,
+      });
+      (ai as AiSuggestionLLM).provider = "stub_fallback";
+      (ai as AiSuggestionLLM).latencyMs = 0;
+    } else {
+      ai = (await res.json()) as AiSuggestionLLM;
+    }
+  } else {
+    ai = aiSuggest({
+      deviationBps,
+      riskThreshold: Number(config.deviationBpsThreshold),
+      pauseThreshold: Number(config.pauseBpsThreshold),
+      signalType: SIGNAL_TYPE,
+    });
+  }
+
+  const actionAfterGuardrail = applyGuardrail(actionType, ai.recommendedAction, aiPolicy);
+  let finalActionType: ActionType = actionAfterGuardrail;
   let shadowAction: string | null = null;
-  if (executionMode === "DRY_RUN" && actionType !== "NO_ACTION") {
-    shadowAction = actionType;
+  if (executionMode === "DRY_RUN" && actionAfterGuardrail !== "NO_ACTION") {
+    shadowAction = actionAfterGuardrail;
     finalActionType = "NO_ACTION";
   }
   const setRiskMode = finalActionType === "SET_RISK_MODE";
   const exceeded = actionType !== "NO_ACTION";
 
-  const ai: AiSuggestion = aiSuggest({
-    deviationBps,
-    riskThreshold: Number(config.deviationBpsThreshold),
-    pauseThreshold: Number(config.pauseBpsThreshold),
-    signalType: SIGNAL_TYPE,
-  });
-  const aiLine = `AI: ${ai.recommendedAction} | severity=${ai.severity} | conf=${ai.confidence}`;
-  const reasonWithAi = reason ? `${reason} | ${aiLine}` : aiLine;
+  const aiLine = `AI: ${ai.recommendedAction} | severity=${ai.severity} | conf=${typeof ai.confidence === "number" ? ai.confidence.toFixed(2) : ai.confidence}${(ai as AiSuggestionLLM).provider ? ` | ${(ai as AiSuggestionLLM).provider}` : ""} | policy=${aiPolicy}`;
   const finalReason = reason || (exceeded ? "threshold exceeded" : "within band");
   const reasonForLog = `${finalReason} | ${aiLine}`;
 
@@ -220,7 +279,7 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
     config.receiver,
     POLICY_ID,
     signalValue,
-    actionType,
+    actionAfterGuardrail,
     timestamp
   );
 
@@ -235,6 +294,7 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
     decisionId,
     policyId: POLICY_ID,
     actionTypeComputed: actionType,
+    actionTypeAfterGuardrail: actionAfterGuardrail,
     actionTypeExecuted: finalActionType,
     ...(shadowAction ? { shadowAction } : {}),
     exceeded,
@@ -257,7 +317,7 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
   const incidentPath = tryWriteIncident(decisionId, incidentBundle);
 
   runtime.log(
-    `SentinelFlow: deviationBps=${deviationBps} reason=${reason} actionType=${actionType} exceeded=${exceeded} executionMode=${executionMode}${shadowAction ? ` shadowAction=${shadowAction}` : ""}`
+    `SentinelFlow: deviationBps=${deviationBps} reason=${reason} actionType=${actionType} actionAfterGuardrail=${actionAfterGuardrail} executionMode=${executionMode}${shadowAction ? ` shadowAction=${shadowAction}` : ""}${(ai as AiSuggestionLLM).provider ? ` ai=${(ai as AiSuggestionLLM).provider}` : ""}`
   );
 
   return JSON.stringify({
