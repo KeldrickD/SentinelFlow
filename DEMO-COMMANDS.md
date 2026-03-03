@@ -49,6 +49,7 @@ $env:DEVIATION_BPS='100'; node pay-and-call.js
 ```
 
 - **Narration:** “With @x402/fetch and an EVM wallet, the buyer pays and retries. We get 200 OK and PAYMENT-RESPONSE confirming settlement.”
+- Use `DEVIATION_BPS=100` for the clean paid x402 receipt segment.
 
 ---
 
@@ -58,11 +59,12 @@ From **repo root**:
 
 ```powershell
 cd c:\dev\SentinelFlow
-$env:PAYLOAD='{"deviationBps":100,"reason":"salt mode demo"}'; npx hardhat run scripts/send-proof-report.ts --network baseSepolia
+$env:PAYLOAD='{"deviationBps":900,"reason":"pause demo"}'; npx hardhat run scripts/send-proof-report.ts --network baseSepolia
 ```
 
 - Copy the printed **`txHash`** (e.g. `0x9c0f...a856`).
 - Open: **https://sepolia.basescan.org/tx/<txHash>**
+- Use `deviationBps=900` here to show a strong onchain PAUSE enforcement path.
 
 ---
 

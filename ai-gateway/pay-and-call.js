@@ -59,10 +59,16 @@ const res = await paidFetch(GATEWAY_URL, {
 });
 
 console.log("\nStatus:", res.status);
+console.log("=== Headers ===");
+for (const [k, v] of res.headers.entries()) {
+  console.log(`${k}: ${v}`);
+}
 
 const paymentResponse =
   res.headers.get("PAYMENT-RESPONSE") ??
+  res.headers.get("X-PAYMENT-RESPONSE") ??
   res.headers.get("payment-response") ??
+  res.headers.get("x-payment-response") ??
   res.headers.get("Payment-Response");
 
 if (paymentResponse) {

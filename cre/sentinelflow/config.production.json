@@ -1,6 +1,7 @@
 {
   "chainName": "ethereum-testnet-sepolia-base-1",
   "receiver": "0x245D1D0A023Ca58847223981BFC6222c8d296d2B",
+  "httpAuthorizedPublicKey": "0x04REPLACE_WITH_UNCOMPRESSED_ECDSA_PUBLIC_KEY",
   "deviationBpsThreshold": 250,
   "pauseBpsThreshold": 700,
   "executionMode": "DRY_RUN",

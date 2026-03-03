@@ -13,7 +13,7 @@ staging-settings:
   workflow-artifacts:
     workflow-path: ./main.ts
     config-path: ./config.staging.json
-    secrets-path: ""
+    secrets-path: ./secrets.staging.json
 
 production-settings:
   rpcs:
@@ -26,4 +26,4 @@ production-settings:
   workflow-artifacts:
     workflow-path: ./main.ts
     config-path: ./config.production.json
-    secrets-path: ""
+    secrets-path: ./secrets.production.json

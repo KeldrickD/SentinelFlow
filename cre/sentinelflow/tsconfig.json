@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["bun-types"]
   },
-  "include": ["*.ts"]
+  "include": ["main.ts", "aiAdvisor.ts"]
 }

@@ -23,6 +23,7 @@ Say one sentence:
 - Start the AI gateway (see `ai-gateway/README.md`).
 - Call `POST /analyze` **without** payment → show **402** and **PAYMENT-REQUIRED** header.
 - Show CRE (or a client) using **@x402/fetch** with payment → **200** and **PAYMENT-RESPONSE**.
+- Use `DEVIATION_BPS=100` for this segment to keep paid receipt output stable.
 - Emphasize: paid AI agent, standards-compliant, economic realism.
 
 ## 3. Show onchain proof
@@ -30,7 +31,7 @@ Say one sentence:
 From repo root:
 
 ```bash
-PAYLOAD='{"deviationBps":100,"reason":"golden demo"}' npx hardhat run scripts/send-proof-report.ts --network baseSepolia
+PAYLOAD='{"deviationBps":900,"reason":"pause demo"}' npx hardhat run scripts/send-proof-report.ts --network baseSepolia
 ```
 
 Copy the printed `txHash`. Then:
@@ -42,6 +43,7 @@ TX_HASH=<txHash> npm run export:base
 
 - Show **verify** output (DecisionLogged decoded, **Mode: SALT**, **Matches event decisionId: ✅ YES**).
 - Show **export** → `incident_exports/<decisionId>.json` and **Determinism: ✅ VERIFIED**.
+- Optional: run `npm run health:base` to show `paused: true` and `verdict: "ALERT"` after PAUSE.
 
 ## 4. Golden proof link
 
