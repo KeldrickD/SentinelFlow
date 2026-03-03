@@ -25,7 +25,24 @@ npm start
 ## Endpoints
 
 - **POST /analyze** — Body: `{ deviationBps, riskThreshold, pauseThreshold, signalType, executionMode }`. Without payment → **402** + **`PAYMENT-REQUIRED`**. CRE (buyer) retries with **`PAYMENT-SIGNATURE`**; gateway verifies via facilitator and returns 200 + AI JSON + **`PAYMENT-RESPONSE`**.
-- **GET /health** — `{ status, x402, facilitator, payTo }`.
+- **GET /health** — `{ status, x402, facilitator, payTo, price, network }`.
+
+## Video demo (pay-and-call)
+
+Unpaid 402 (curl):
+
+```bash
+curl -s -i -X POST http://localhost:8080/analyze -H "Content-Type: application/json" -d "{\"deviationBps\":100,\"reason\":\"demo\"}"
+```
+
+Paid 200 (requires `X402_BUYER_EVM_PRIVATE_KEY` in `ai-gateway/.env`):
+
+```bash
+cd ai-gateway
+DEVIATION_BPS=100 node pay-and-call.js
+```
+
+Optional: `DEVIATION_BPS=300` (SET_RISK_MODE) or `DEVIATION_BPS=900` (PAUSE) to vary the payload. Script prints status, PAYMENT-RESPONSE (decoded if base64 JSON), and body.
 
 ## CRE as buyer
 

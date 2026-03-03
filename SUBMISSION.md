@@ -2,7 +2,7 @@
 
 ## One-liner
 
-SentinelFlow is an autonomous onchain operations engine built with Chainlink CRE: offchain workflows evaluate risk signals, submit a single structured report onchain, and a receiver contract validates, logs every decision, and conditionally executes safe controls (risk-mode, pause) with cooldown and tiered response.
+SentinelFlow is a **policy-first AI-assisted execution engine** with **monetized agent intelligence (x402)** and **verifiable onchain enforcement**. Built with Chainlink CRE: offchain workflows evaluate risk signals, submit a single structured report onchain, and a receiver contract validates, logs every decision, and conditionally executes safe controls (risk-mode, pause) with cooldown and tiered response.
 
 ## Short description (for forms)
 

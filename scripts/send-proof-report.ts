@@ -17,7 +17,29 @@ require("dotenv").config({ path: path.join(__dirname, "..", "cre", ".env") });
 
 const PAYLOAD_ARG = process.argv.find((a) => a.startsWith("{")) || process.env.PAYLOAD;
 
-/** Must match cre/sentinelflow/main.ts deterministicDecisionId for verify-tx to pass. */
+function randomSaltHex(bytes = 8): string {
+  return ethers.hexlify(ethers.randomBytes(bytes));
+}
+
+/** Salt-based decisionId (no timestamp) so verify can be ✅ deterministically. */
+function deterministicDecisionIdSalt(
+  receiver: string,
+  policyId: string,
+  signalValue: number,
+  actionType: string,
+  saltHex: string
+): string {
+  const payload = `${receiver}-${policyId}-${signalValue}-${actionType}-${saltHex}`;
+  let h = 0;
+  for (let i = 0; i < payload.length; i++) {
+    const c = payload.charCodeAt(i);
+    h = (h << 5) - h + c;
+    h = h & 0x7fffffff;
+  }
+  return `sf-${policyId}-${saltHex.slice(2, 10)}-${Math.abs(h).toString(36).slice(0, 8)}`;
+}
+
+/** Legacy timestamp-based (for backwards compat). */
 function deterministicDecisionId(
   receiver: string,
   policyId: string,
@@ -53,18 +75,19 @@ function buildReportFromPayload(
   else if (deviationBps >= config.deviationBpsThreshold) actionType = "SET_RISK_MODE";
 
   const setRiskMode = actionType === "SET_RISK_MODE";
-  const timestamp = Math.floor(Date.now() / 1000);
-  const decisionId = deterministicDecisionId(
+  const saltHex = randomSaltHex(8);
+  const decisionId = deterministicDecisionIdSalt(
     config.receiver,
     policyId,
     deviationBps,
     actionType,
-    timestamp
+    saltHex
   );
   const baseReason = reason || (actionType !== "NO_ACTION" ? "threshold exceeded" : "within band");
   const severity = actionType === "PAUSE" ? "CRITICAL" : actionType === "SET_RISK_MODE" ? "HIGH" : "LOW";
   const confidence = actionType === "PAUSE" ? 0.9 : actionType === "SET_RISK_MODE" ? 0.8 : 0.7;
-  const reasonWithAi = `${baseReason} | AI: ${actionType} | severity=${severity} | conf=${confidence}`;
+  const reasonWithAi =
+    `${baseReason} | AI: ${actionType} | severity=${severity} | conf=${confidence} | salt=${saltHex}`;
   return {
     setRiskMode,
     decisionId,

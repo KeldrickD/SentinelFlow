@@ -120,6 +120,40 @@ function deterministicDecisionId(
   return `sf-${policyId}-${timestamp}-${Math.abs(h).toString(36).slice(0, 8)}`;
 }
 
+function randomSaltHex(bytes = 8): string {
+  try {
+    const cryptoObj = (globalThis as unknown as { crypto?: Crypto }).crypto;
+    if (cryptoObj?.getRandomValues) {
+      const arr = new Uint8Array(bytes);
+      cryptoObj.getRandomValues(arr);
+      return "0x" + Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+  } catch {
+    // ignore
+  }
+  let s = "0x";
+  for (let i = 0; i < bytes; i++)
+    s += Math.floor(Math.random() * 256).toString(16).padStart(2, "0");
+  return s;
+}
+
+function deterministicDecisionIdSalt(
+  receiver: string,
+  policyId: string,
+  signalValue: number,
+  actionType: string,
+  saltHex: string
+): string {
+  const payload = `${receiver}-${policyId}-${signalValue}-${actionType}-${saltHex}`;
+  let h = 0;
+  for (let i = 0; i < payload.length; i++) {
+    const c = payload.charCodeAt(i);
+    h = (h << 5) - h + c;
+    h = h & 0x7fffffff;
+  }
+  return `sf-${policyId}-${saltHex.slice(2, 10)}-${Math.abs(h).toString(36).slice(0, 8)}`;
+}
+
 function tryWriteIncident(decisionId: string, incident: Record<string, unknown>): string | null {
   try {
     const base =
@@ -291,15 +325,16 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
 
   const aiLine = `AI: ${ai.recommendedAction} | severity=${ai.severity} | conf=${typeof ai.confidence === "number" ? ai.confidence.toFixed(2) : ai.confidence}${(ai as AiSuggestionLLM).provider ? ` | ${(ai as AiSuggestionLLM).provider}` : ""} | policy=${aiPolicy}`;
   const finalReason = reason || (exceeded ? "threshold exceeded" : "within band");
-  const reasonForLog = `${finalReason} | ${aiLine}`;
 
-  const timestamp = Math.floor(Date.now() / 1000);
-  const decisionId = deterministicDecisionId(
+  const saltHex = randomSaltHex(8);
+  const reasonForLog = `${finalReason} | ${aiLine} | salt=${saltHex}`;
+
+  const decisionId = deterministicDecisionIdSalt(
     config.receiver,
     POLICY_ID,
     signalValue,
     actionAfterGuardrail,
-    timestamp
+    saltHex
   );
 
   const metaOut: Record<string, unknown> = {
@@ -308,6 +343,7 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
     ...(shadowAction ? { shadowAction } : {}),
     policyVersion,
     policyHash,
+    salt: saltHex,
   };
   const incidentBundle: Record<string, unknown> = {
     decisionId,

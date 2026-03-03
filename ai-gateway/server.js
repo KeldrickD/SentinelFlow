@@ -2,6 +2,7 @@
  * AI Gateway: real x402 seller (Option B1).
  * Uses x402-express paymentMiddleware: 402 + PAYMENT-REQUIRED, facilitator settlement, 200 + PAYMENT-RESPONSE.
  */
+import "dotenv/config";
 import express from "express";
 import { paymentMiddleware } from "x402-express";
 
@@ -10,7 +11,7 @@ app.use(express.json());
 
 const PORT = Number(process.env.PORT ?? "8080");
 const PAY_TO_ADDRESS = process.env.PAY_TO_ADDRESS;
-const X402_PRICE = process.env.X402_PRICE ?? "$0.01";
+const X402_PRICE = process.env.X402_PRICE ?? "0.01";
 const X402_FACILITATOR_URL = process.env.X402_FACILITATOR_URL ?? "https://x402.org/facilitator";
 
 if (!PAY_TO_ADDRESS || !PAY_TO_ADDRESS.startsWith("0x")) {
@@ -18,22 +19,20 @@ if (!PAY_TO_ADDRESS || !PAY_TO_ADDRESS.startsWith("0x")) {
   process.exit(1);
 }
 
-// Real x402: middleware returns 402 with PAYMENT-REQUIRED, verifies PAYMENT-SIGNATURE via facilitator
-app.use(
-  paymentMiddleware(
-    /** @type {`0x${string}`} */ (PAY_TO_ADDRESS),
-    {
-      "/analyze": {
-        price: X402_PRICE,
-        network: "base-sepolia",
-        config: {
-          description: "SentinelFlow AI risk analysis (CRE & AI)",
-          resource: "/analyze",
-        },
+// x402 middleware: only applied to /analyze so /health stays free
+const x402 = paymentMiddleware(
+  /** @type {`0x${string}`} */ (PAY_TO_ADDRESS),
+  {
+    "/analyze": {
+      price: X402_PRICE,
+      network: "base-sepolia",
+      config: {
+        description: "SentinelFlow AI risk analysis (CRE & AI)",
+        resource: "/analyze",
       },
     },
-    { url: X402_FACILITATOR_URL }
-  )
+  },
+  { url: X402_FACILITATOR_URL }
 );
 
 async function callOpenAI(body) {
@@ -103,13 +102,14 @@ Return JSON only.`;
   };
 }
 
-app.post("/analyze", async (req, res) => {
+app.post("/analyze", x402, async (req, res) => {
   try {
     const result = await callOpenAI(req.body);
     return res.json(result);
   } catch (err) {
-    console.error("AI Gateway error:", err.message);
-    return res.status(500).json({ error: "AI inference failed", message: err.message });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("AI Gateway error:", message);
+    return res.status(500).json({ error: "AI inference failed", message });
   }
 });
 
@@ -119,6 +119,8 @@ app.get("/health", (req, res) => {
     x402: true,
     facilitator: X402_FACILITATOR_URL,
     payTo: PAY_TO_ADDRESS,
+    price: X402_PRICE,
+    network: "base-sepolia",
   });
 });
 

@@ -1,6 +1,22 @@
 # SentinelFlow
 
-**SentinelFlow** is an autonomous onchain operations engine built with Chainlink CRE. Offchain workflows evaluate risk signals and submit a single structured report onchain. A receiver contract validates the report, logs every decision for auditability, and conditionally executes safe operational controls (risk-mode changes, pause). This replaces bots and manual ops with deterministic, rule-based automation.
+**SentinelFlow** is a **policy-first AI-assisted execution engine** with **monetized agent intelligence (x402)** and **verifiable onchain enforcement**. Built with Chainlink CRE: offchain workflows evaluate risk signals and submit a single structured report onchain; a receiver contract validates the report, logs every decision for auditability, and conditionally executes safe operational controls (risk-mode changes, pause). This replaces bots and manual ops with deterministic, rule-based automation.
+
+---
+
+## Judges — quick links
+
+| What | Link / command |
+|------|-----------------|
+| **Golden proof tx** (verifies ✅) | [Basescan](https://sepolia.basescan.org/tx/0x6df562caabb54452bcc8d128b1a5691dfcb3e6dc6cbc9934bd47ca6dbe919269) |
+| **Demo Script A** (if deploy approved) | [docs/DEMO-SCRIPT-A.md](docs/DEMO-SCRIPT-A.md) |
+| **Demo Script B** (no deploy) | [docs/DEMO-SCRIPT-B.md](docs/DEMO-SCRIPT-B.md) |
+| **x402 proof** | 1) `curl -X POST http://localhost:8080/analyze -H "Content-Type: application/json" -d '{"deviationBps":100}'` → 402 + PAYMENT-REQUIRED<br>2) `cd ai-gateway && node pay-and-call.js` → 200 + PAYMENT-RESPONSE |
+| **Chainlink / CRE files** | [cre/sentinelflow/main.ts](cre/sentinelflow/main.ts), [workflow.yaml](cre/sentinelflow/workflow.yaml), [project.yaml](cre/project.yaml), [aiAdvisor.ts](cre/sentinelflow/aiAdvisor.ts), [aiLLM.ts](cre/sentinelflow/aiLLM.ts) |
+
+Before recording: run the [Pre-recording checklist](docs/DEMO-SCRIPT-B.md#pre-recording-checklist-do-once-before-recording) in Demo Script B once.
+
+---
 
 ## Architecture (simplified)
 
@@ -111,7 +127,7 @@ Or use package scripts: `npm run status:base`, `npm run health:base`, `npm run d
 | C) PAUSE (900 bps) | Journal + paused | [`0xe05f...f280a`](https://sepolia.basescan.org/tx/0xe05f1255585c23fe961cfe50bae4fc976779f6715d0c4e8186d530557c1f280a) |
 | D) COOLDOWN_BLOCKED (repeat B) | Journal, actionType=COOLDOWN_BLOCKED | [`0xfff4...0ca77`](https://sepolia.basescan.org/tx/0xfff48f9e2e96ce505341a9061188aa7e153170f10d45fe7e55bb8d8e99f0ca77) |
 
-Reproduce with: `PAYLOAD='{"deviationBps":100,"reason":"within band"}' npx hardhat run scripts/send-proof-report.ts --network baseSepolia` (see DEMO.md).
+Reproduce with: `PAYLOAD='{"deviationBps":100,"reason":"within band"}' npx hardhat run scripts/send-proof-report.ts --network baseSepolia` (see **DEMO.md**). For a structured video flow: **Script A** (if deploy access approved) → [docs/DEMO-SCRIPT-A.md](docs/DEMO-SCRIPT-A.md); **Script B** (if not) → [docs/DEMO-SCRIPT-B.md](docs/DEMO-SCRIPT-B.md).
 
 ### Golden demo path (4 commands)
 
@@ -128,9 +144,9 @@ Use the tx from step 2 in the **Proof tx (verifies ✅)** row below.
 
 | Description | Tx |
 |-------------|-----|
-| Golden proof (NO_ACTION, current repo) | _Paste tx hash from golden step 2_ |
+| **Golden proof** (salt-mode, NO_ACTION) | [`0x6df5...9269`](https://sepolia.basescan.org/tx/0x6df562caabb54452bcc8d128b1a5691dfcb3e6dc6cbc9934bd47ca6dbe919269) |
 
-Older txs (A/B/C/D above) may show ❌ on verify (previous decisionId format). New txs from current repo verify.
+Reproduce: `PAYLOAD='{"deviationBps":100,"reason":"salt mode demo"}' npx hardhat run scripts/send-proof-report.ts --network baseSepolia`, then `TX_HASH=<txHash> npm run verify:base` (Mode: SALT ✅) and `TX_HASH=<txHash> npm run export:base`.
 
 ### x402 flow (AI Gateway)
 

@@ -2,6 +2,8 @@
 
 Reproduce the Base Sepolia demo in under 20 minutes.
 
+**Video flows:** If deployment access is approved → [docs/DEMO-SCRIPT-A.md](docs/DEMO-SCRIPT-A.md). If not → [docs/DEMO-SCRIPT-B.md](docs/DEMO-SCRIPT-B.md) (simulate crash + x402 + onchain proof).
+
 ## Prerequisites
 
 - Node.js, npm, Hardhat (`npm install` then `npx hardhat compile`)

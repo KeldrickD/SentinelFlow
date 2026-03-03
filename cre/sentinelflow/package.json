@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "postinstall": "bunx cre-setup && node scripts/apply-cre-patches.cjs"
+    "postinstall": "bunx cre-setup && node scripts/apply-cre-patches.cjs",
+    "cre-compile": "cre-compile"
   },
   "dependencies": {
     "@chainlink/cre-sdk": "^1.0.7",

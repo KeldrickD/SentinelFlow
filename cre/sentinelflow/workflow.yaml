@@ -1,8 +1,11 @@
 # CRE workflow config. Target names must match project.yaml targets.
 # Simulate: cre workflow simulate sentinelflow --target staging-settings
+# Deploy requires ethereum-mainnet RPC (Workflow Registry on mainnet).
 
 staging-settings:
   rpcs:
+    - chain-name: ethereum-mainnet
+      url: https://eth.llamarpc.com
     - chain-name: ethereum-testnet-sepolia-base-1
       url: https://sepolia.base.org
   user-workflow:
@@ -14,6 +17,8 @@ staging-settings:
 
 production-settings:
   rpcs:
+    - chain-name: ethereum-mainnet
+      url: https://eth.llamarpc.com
     - chain-name: ethereum-testnet-sepolia-base-1
       url: https://sepolia.base.org
   user-workflow:

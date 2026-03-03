@@ -8,8 +8,30 @@ function safeFileName(s: string): string {
 
 /**
  * Must match cre/sentinelflow/main.ts and scripts/verify-tx.ts exactly
- * so determinism verification passes.
+ * so determinism verification passes. Supports salt-mode (reason contains salt=).
  */
+function extractSaltHex(reason: string): string | null {
+  const m = reason.match(/salt=(0x[0-9a-fA-F]{8,64})/);
+  return m?.[1] ?? null;
+}
+
+function deterministicDecisionIdSalt(
+  receiver: string,
+  policyId: string,
+  signalValue: number,
+  actionType: string,
+  saltHex: string
+): string {
+  const payload = `${receiver}-${policyId}-${signalValue}-${actionType}-${saltHex}`;
+  let h = 0;
+  for (let i = 0; i < payload.length; i++) {
+    const c = payload.charCodeAt(i);
+    h = (h << 5) - h + c;
+    h = h & 0x7fffffff;
+  }
+  return `sf-${policyId}-${saltHex.slice(2, 10)}-${Math.abs(h).toString(36).slice(0, 8)}`;
+}
+
 function deterministicDecisionId(
   receiver: string,
   policyId: string,
@@ -80,13 +102,22 @@ async function main() {
     timestamp: a.timestamp.toString(),
   };
 
-  const recomputedString = deterministicDecisionId(
-    receiverAddr,
-    policyIdString,
-    Number(a.signalValue),
-    a.actionType,
-    Number(a.timestamp)
-  );
+  const saltHex = extractSaltHex(a.reason);
+  const recomputedString = saltHex
+    ? deterministicDecisionIdSalt(
+        receiverAddr,
+        policyIdString,
+        Number(a.signalValue.toString()),
+        a.actionType,
+        saltHex
+      )
+    : deterministicDecisionId(
+        receiverAddr,
+        policyIdString,
+        Number(a.signalValue.toString()),
+        a.actionType,
+        Number(a.timestamp)
+      );
   const recomputedBytes32 = ethers.keccak256(ethers.toUtf8Bytes(recomputedString));
   const determinismOk = recomputedBytes32.toLowerCase() === a.decisionId.toLowerCase();
 
