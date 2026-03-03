@@ -17,7 +17,7 @@ CRE (offchain)  →  Forwarder  →  SentinelFlowReceiver  →  DecisionJournal 
 
 ## CRE & AI Track Compliance
 
-This project qualifies for **CRE & AI** by integrating a CRE workflow with **blockchain** (Base Sepolia) and **AI** (OpenAI or x402-paid AI Gateway). The workflow supports `aiMode: STUB | LLM | GATEWAY`; with `LLM`, it calls OpenAI for a suggested action and applies a **guardrail** (e.g. `DEESCALATE_ONLY`) so the executed action never exceeds the policy maximum. Optional **AI Gateway** (`ai-gateway/`) exposes `POST /analyze` behind an x402 payment header.
+This project qualifies for **CRE & AI** by integrating a CRE workflow with **blockchain** (Base Sepolia) and **AI** (OpenAI or x402-paid AI Gateway). We use the **`x402-express`** middleware package for the seller gateway and **`@x402/fetch`** for the buyer auto-pay wrapper. The workflow supports `aiMode: STUB | LLM | GATEWAY`; with `LLM`, it calls OpenAI for a suggested action and applies a **guardrail** (e.g. `DEESCALATE_ONLY`). With **GATEWAY**, CRE calls the **AI Gateway** (`ai-gateway/`) which is a **real x402 seller** (Option B1): gateway returns **402** + **PAYMENT-REQUIRED**, CRE uses **@x402/fetch** with **X402_BUYER_EVM_PRIVATE_KEY** to auto pay and retry, then receives **200** + **PAYMENT-RESPONSE**. See **ai-gateway/README.md** and **docs/APIs.md**.
 
 **Chainlink / CRE files (for judge review):**
 
@@ -34,7 +34,7 @@ This project qualifies for **CRE & AI** by integrating a CRE workflow with **blo
 Copy the example env files and fill in secrets (do not commit `.env`):
 
 - **Repo root** (for deploy): copy `.env.example` to `.env` and set `DEPLOYER_PRIVATE_KEY`, `FORWARDER_ADDRESS`, etc.
-- **CRE** (for simulate): copy `cre/.env.example` to `cre/.env` and set `CRE_ETH_PRIVATE_KEY` (64 hex, no `0x`). This key must be funded on Base Sepolia.
+- **CRE** (for simulate): copy `cre/.env.example` to `cre/.env` and set `CRE_ETH_PRIVATE_KEY` (64 hex, no `0x`). This key must be funded on Base Sepolia. For **GATEWAY** + real x402: set **`X402_BUYER_EVM_PRIVATE_KEY=0x...`** (funded Base Sepolia wallet with USDC for payment).
 
 **How to get `FORWARDER_ADDRESS`:**  
 For CRE workflow **simulation**, the “forwarder” is the **Ethereum address that sends the report transaction**—i.e. the address of the key in `cre/.env` (`CRE_ETH_PRIVATE_KEY`). CRE does not use a separate forwarder contract in sim; your wallet is the caller. So set `FORWARDER_ADDRESS` to that address. Easiest: use the **same key** for deploy and for CRE (same as `DEPLOYER_PRIVATE_KEY`). Then run:
@@ -112,3 +112,62 @@ Or use package scripts: `npm run status:base`, `npm run health:base`, `npm run d
 | D) COOLDOWN_BLOCKED (repeat B) | Journal, actionType=COOLDOWN_BLOCKED | [`0xfff4...0ca77`](https://sepolia.basescan.org/tx/0xfff48f9e2e96ce505341a9061188aa7e153170f10d45fe7e55bb8d8e99f0ca77) |
 
 Reproduce with: `PAYLOAD='{"deviationBps":100,"reason":"within band"}' npx hardhat run scripts/send-proof-report.ts --network baseSepolia` (see DEMO.md).
+
+### Golden demo path (4 commands)
+
+Run in order (after deploy and env are set):
+
+1. **Health** — `npm run health:base`
+2. **Send one new report** — `PAYLOAD="{\"deviationBps\":100,\"reason\":\"golden demo\"}" npx hardhat run scripts/send-proof-report.ts --network baseSepolia` — copy the printed `txHash`
+3. **Verify** — `TX_HASH=<tx_hash> npm run verify:base` → expect **✅ YES**
+4. **Export** — `TX_HASH=<tx_hash> npm run export:base` → writes `incident_exports/<decisionId>.json`
+
+Use the tx from step 2 in the **Proof tx (verifies ✅)** row below.
+
+### Proof tx (verifies ✅)
+
+| Description | Tx |
+|-------------|-----|
+| Golden proof (NO_ACTION, current repo) | _Paste tx hash from golden step 2_ |
+
+Older txs (A/B/C/D above) may show ❌ on verify (previous decisionId format). New txs from current repo verify.
+
+### x402 flow (AI Gateway)
+
+We use the **`x402-express`** middleware package for the seller gateway and **`@x402/fetch`** for the buyer auto-pay wrapper. B1 (demo) uses the public testnet facilitator; for production (B2) see **Production switch (Option B2)** below.
+
+1. Client calls `POST /analyze` without payment → server returns **402** and **`PAYMENT-REQUIRED`** header (scheme, network, asset, amount, destination).
+2. CRE (buyer) uses **@x402/fetch** with **`X402_BUYER_EVM_PRIVATE_KEY`** to sign payment and retry with **`PAYMENT-SIGNATURE`**.
+3. Server verifies via facilitator, calls OpenAI, returns **200** + **`PAYMENT-RESPONSE`** header (settlement).
+
+CRE = orchestrator; AI Gateway = paid agent. Matches “AI agents consuming CRE workflows with x402 payments.”
+
+#### Production switch (Option B2: CDP facilitator)
+
+In production, replace the public facilitator URL with a hosted facilitator you control (or a CDP-integrated facilitator). The gateway code remains the same; only facilitator configuration changes.
+
+**Env changes**
+
+* `X402_FACILITATOR_URL` → set to your production facilitator endpoint
+* `X402_PRICE` → set to real pricing (e.g. `$0.05` per analysis)
+* `PAY_TO_ADDRESS` → set to treasury address (multi-sig recommended)
+
+**Buyer changes**
+
+* CRE's `X402_BUYER_EVM_PRIVATE_KEY` should be a dedicated service wallet with spending limits.
+* Optionally route payment through a payment service / sponsored wallet pattern.
+
+**Notes**
+
+* Keep `aiPolicy=DEESCALATE_ONLY` in production to prevent AI-triggered escalation.
+* Log and persist `PAYMENT-RESPONSE` receipts for audit and reconciliation.
+
+**B2 readiness checklist** (~1 min read)
+
+* [ ] Run your own facilitator (or use a managed facilitator)
+* [ ] Put gateway behind HTTPS + auth allowlist (optional)
+* [ ] Rotate and protect buyer key (HSM or managed secrets)
+* [ ] Add rate limits + request signing
+* [ ] Reconcile receipts from `PAYMENT-RESPONSE`
+
+Example production CRE config: **cre/sentinelflow/config.production.json** (set `aiEndpoint` to your hosted gateway, e.g. `https://YOUR_GATEWAY_DOMAIN/analyze`).

@@ -1,21 +1,40 @@
 /**
- * AI Gateway: x402 payment-gated POST /analyze for CRE & AI track.
- * CRE workflow can call this endpoint with X402_PAYMENT_TOKEN header instead of OpenAI directly.
- * Set OPENAI_API_KEY in .env; for x402 pass token in x402-payment header.
+ * AI Gateway: real x402 seller (Option B1).
+ * Uses x402-express paymentMiddleware: 402 + PAYMENT-REQUIRED, facilitator settlement, 200 + PAYMENT-RESPONSE.
  */
 import express from "express";
+import { paymentMiddleware } from "x402-express";
 
 const app = express();
 app.use(express.json());
 
 const PORT = Number(process.env.PORT ?? "8080");
-const X402_REQUIRED = process.env.X402_REQUIRE_PAYMENT !== "false";
+const PAY_TO_ADDRESS = process.env.PAY_TO_ADDRESS;
+const X402_PRICE = process.env.X402_PRICE ?? "$0.01";
+const X402_FACILITATOR_URL = process.env.X402_FACILITATOR_URL ?? "https://x402.org/facilitator";
 
-function verifyX402Payment(req) {
-  const token = req.headers["x402-payment"];
-  if (!X402_REQUIRED) return true;
-  return Boolean(token && String(token).length > 0);
+if (!PAY_TO_ADDRESS || !PAY_TO_ADDRESS.startsWith("0x")) {
+  console.error("Set PAY_TO_ADDRESS (0x...) in .env");
+  process.exit(1);
 }
+
+// Real x402: middleware returns 402 with PAYMENT-REQUIRED, verifies PAYMENT-SIGNATURE via facilitator
+app.use(
+  paymentMiddleware(
+    /** @type {`0x${string}`} */ (PAY_TO_ADDRESS),
+    {
+      "/analyze": {
+        price: X402_PRICE,
+        network: "base-sepolia",
+        config: {
+          description: "SentinelFlow AI risk analysis (CRE & AI)",
+          resource: "/analyze",
+        },
+      },
+    },
+    { url: X402_FACILITATOR_URL }
+  )
+);
 
 async function callOpenAI(body) {
   const apiKey = process.env.OPENAI_API_KEY ?? process.env.AI_API_KEY;
@@ -85,13 +104,6 @@ Return JSON only.`;
 }
 
 app.post("/analyze", async (req, res) => {
-  if (!verifyX402Payment(req)) {
-    return res.status(402).json({
-      error: "Payment Required (x402)",
-      message: "Include x402-payment header with valid token.",
-    });
-  }
-
   try {
     const result = await callOpenAI(req.body);
     return res.json(result);
@@ -102,9 +114,16 @@ app.post("/analyze", async (req, res) => {
 });
 
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", x402Required: X402_REQUIRED });
+  res.json({
+    status: "ok",
+    x402: true,
+    facilitator: X402_FACILITATOR_URL,
+    payTo: PAY_TO_ADDRESS,
+  });
 });
 
 app.listen(PORT, () => {
-  console.log(`SentinelFlow AI Gateway on port ${PORT} (x402 required: ${X402_REQUIRED})`);
+  console.log(
+    `SentinelFlow AI Gateway on port ${PORT} (x402 seller, payTo=${PAY_TO_ADDRESS}, facilitator=${X402_FACILITATOR_URL})`
+  );
 });

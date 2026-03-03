@@ -16,6 +16,7 @@ import { createPublicClient, http, keccak256, stringToHex } from "viem";
 import { baseSepolia } from "viem/chains";
 import { aiSuggest, type AiSuggestion } from "./aiAdvisor";
 import { aiSuggestLLM, applyGuardrail, type AiSuggestionLLM } from "./aiLLM";
+import { paidGatewayPost } from "./x402PaidFetch";
 
 type ExecutionMode = "EXECUTE" | "DRY_RUN";
 
@@ -227,19 +228,14 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
       signalType: SIGNAL_TYPE,
       executionMode,
     };
-    const x402Token = process.env.X402_PAYMENT_TOKEN;
-    const res = await fetch(config.aiEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(x402Token ? { "x402-payment": x402Token } : {}),
-      },
-      body: JSON.stringify(gatewayPayload),
-    });
-    if (!res.ok) {
-      if (res.status === 402) {
-        runtime.log("AI Gateway returned 402 Payment Required (x402); falling back to stub");
+    const paid = await paidGatewayPost(config.aiEndpoint, gatewayPayload, (msg) => runtime.log(msg));
+    if (paid && paid.status === 200) {
+      ai = paid.data as AiSuggestionLLM;
+      if (paid.paymentResponseHeader) {
+        runtime.log("x402 settlement: PAYMENT-RESPONSE received from gateway");
       }
+    } else if (paid && paid.status !== 200) {
+      runtime.log(`AI Gateway returned ${paid.status}; falling back to stub`);
       ai = aiSuggest({
         deviationBps,
         riskThreshold: Number(config.deviationBpsThreshold),
@@ -249,7 +245,30 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
       (ai as AiSuggestionLLM).provider = "stub_fallback";
       (ai as AiSuggestionLLM).latencyMs = 0;
     } else {
-      ai = (await res.json()) as AiSuggestionLLM;
+      const x402Token = process.env.X402_PAYMENT_TOKEN;
+      const res = await fetch(config.aiEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(x402Token ? { "PAYMENT-SIGNATURE": x402Token, "x402-payment": x402Token } : {}),
+        },
+        body: JSON.stringify(gatewayPayload),
+      });
+      if (!res.ok) {
+        if (res.status === 402) {
+          runtime.log("AI Gateway returned 402 Payment Required (x402); falling back to stub");
+        }
+        ai = aiSuggest({
+          deviationBps,
+          riskThreshold: Number(config.deviationBpsThreshold),
+          pauseThreshold: Number(config.pauseBpsThreshold),
+          signalType: SIGNAL_TYPE,
+        });
+        (ai as AiSuggestionLLM).provider = "stub_fallback";
+        (ai as AiSuggestionLLM).latencyMs = 0;
+      } else {
+        ai = (await res.json()) as AiSuggestionLLM;
+      }
     }
   } else {
     ai = aiSuggest({

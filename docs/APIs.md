@@ -2,6 +2,8 @@
 
 ## AI Gateway (ai-gateway)
 
+Real x402 seller (Option B1): uses **x402-express** middleware and testnet facilitator. First request returns **402** with **PAYMENT-REQUIRED**; client pays and retries with **PAYMENT-SIGNATURE**; server returns **200** with **PAYMENT-RESPONSE** (settlement).
+
 ### POST /analyze
 
 Payment-gated AI suggestion for CRE workflow (x402).
@@ -10,7 +12,7 @@ Payment-gated AI suggestion for CRE workflow (x402).
 
 - **Headers**
   - `Content-Type: application/json`
-  - `x402-payment`: (required when `X402_REQUIRE_PAYMENT` is true) payment token or proof
+  - (First call: no payment → 402. Retry with **PAYMENT-SIGNATURE** after paying via facilitator.)
 - **Body**
   ```json
   {
@@ -36,19 +38,17 @@ Payment-gated AI suggestion for CRE workflow (x402).
 }
 ```
 
+- **Header** **PAYMENT-RESPONSE**: settlement confirmation (after payment).
+
 **Response (402 Payment Required)**
 
-```json
-{
-  "error": "Payment Required (x402)",
-  "message": "Include x402-payment header with valid token."
-}
-```
+- **Header** **PAYMENT-REQUIRED**: payment requirements (scheme, network, amount, destination, resource). Buyer uses **@x402/fetch** (or similar) to pay and retry with **PAYMENT-SIGNATURE**.
+- **Body**: `{ "error": "Payment Required (x402)", "message": "..." }`.
 
 ### GET /health
 
 - **Response (200)**  
-  `{ "status": "ok", "x402Required": true }`
+  `{ "status": "ok", "x402": true, "facilitator": "...", "payTo": "0x..." }`
 
 ---
 

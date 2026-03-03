@@ -1,7 +1,7 @@
 {
   "name": "sentinelflow-ai-gateway",
   "version": "1.0.0",
-  "description": "x402 payment-gated AI endpoint for SentinelFlow CRE",
+  "description": "x402 payment-gated AI endpoint for SentinelFlow CRE (real x402 seller)",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -9,6 +9,7 @@
     "dev": "node --watch server.js"
   },
   "dependencies": {
-    "express": "^4.21.0"
+    "express": "^4.21.0",
+    "x402-express": "^1.1.0"
   }
 }
