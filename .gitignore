@@ -29,3 +29,6 @@ incident_exports/
 dist/
 *.log
 npm-debug.log*
+
+# CRE local-only secrets overrides
+cre/sentinelflow/secrets.local*.json

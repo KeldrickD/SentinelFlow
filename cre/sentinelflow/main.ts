@@ -1,33 +1,18 @@
 /**
- * SentinelFlow CRE workflow: HTTP trigger + 2-tier policy (NO_ACTION | SET_RISK_MODE | PAUSE).
- * Optional: PRICE_FEED signal mode, AI advisor (logged), incident bundle output.
+ * SentinelFlow CRE workflow: WASM-safe HTTP trigger + policy engine.
  */
-import fs from "node:fs";
-import path from "node:path";
-import {
-  HTTPCapability,
-  handler,
-  Runner,
-  decodeJson,
-  type Runtime,
-  type HTTPPayload,
-} from "@chainlink/cre-sdk";
-import { createPublicClient, http, keccak256, stringToHex } from "viem";
-import { baseSepolia } from "viem/chains";
+import { HTTPCapability, handler, Runner, decodeJson, type Runtime, type HTTPPayload } from "@chainlink/cre-sdk";
 import { aiSuggest, type AiSuggestion } from "./aiAdvisor";
-import { aiSuggestLLM, applyGuardrail, type AiSuggestionLLM } from "./aiLLM";
-import { paidGatewayPost } from "./x402PaidFetch";
 
 type ExecutionMode = "EXECUTE" | "DRY_RUN";
-
-function normalizeExecutionMode(m: unknown): ExecutionMode {
-  return m === "DRY_RUN" ? "DRY_RUN" : "EXECUTE";
-}
+type ActionType = "NO_ACTION" | "SET_RISK_MODE" | "PAUSE";
 
 type Config = {
   chainName: string;
   receiver: string;
   gasLimit: string;
+  // ECDSA public key for HTTP trigger auth (0x04 + 128 hex chars)
+  httpAuthorizedPublicKey?: string;
   deviationBpsThreshold: number;
   pauseBpsThreshold: number;
   riskModeWhenExceeded: number;
@@ -38,10 +23,6 @@ type Config = {
   policyVersion?: string;
   aiMode?: "STUB" | "LLM" | "GATEWAY";
   aiPolicy?: "DEESCALATE_ONLY" | "ADVISORY_ONLY";
-  aiEndpoint?: string;
-  aiModel?: string;
-  aiTimeoutMs?: number;
-  aiMaxTokens?: number;
 };
 
 type RequestBody = {
@@ -50,23 +31,17 @@ type RequestBody = {
   meta?: Record<string, unknown>;
 };
 
-type ActionType = "NO_ACTION" | "SET_RISK_MODE" | "PAUSE";
+type AiSuggestionLLM = AiSuggestion & {
+  provider?: string;
+  latencyMs?: number;
+};
 
-const AGGREGATOR_V3_ABI = [
-  {
-    name: "latestRoundData",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [
-      { name: "roundId", type: "uint80" },
-      { name: "answer", type: "int256" },
-      { name: "startedAt", type: "uint256" },
-      { name: "updatedAt", type: "uint256" },
-      { name: "answeredInRound", type: "uint80" },
-    ],
-  },
-] as const;
+const POLICY_ID = "SENTINELFLOW_POLICY_V0";
+const SIGNAL_TYPE = "PRICE_DEVIATION_BPS";
+
+function normalizeExecutionMode(m: unknown): ExecutionMode {
+  return m === "DRY_RUN" ? "DRY_RUN" : "EXECUTE";
+}
 
 function stableStringify(obj: unknown): string {
   if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
@@ -75,26 +50,15 @@ function stableStringify(obj: unknown): string {
   return `{${keys.map((k) => JSON.stringify(k) + ":" + stableStringify((obj as Record<string, unknown>)[k])).join(",")}}`;
 }
 
-function loadPolicyFile(baseDir: string, policyVersion: string): Record<string, unknown> {
-  const filePath = path.join(baseDir, "policies", `policy.${policyVersion}.json`);
-  const raw = fs.readFileSync(filePath, "utf-8");
-  return JSON.parse(raw) as Record<string, unknown>;
-}
-
 function computePolicyHash(policyObj: Record<string, unknown>): `0x${string}` {
   const canonical = stableStringify(policyObj);
-  return keccak256(stringToHex(canonical));
-}
-
-function validateConfig(config: Config): void {
-  if (!config.receiver || typeof config.receiver !== "string") {
-    throw new Error("Config missing or invalid: receiver");
+  let h = 0x811c9dc5;
+  for (let i = 0; i < canonical.length; i++) {
+    h ^= canonical.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
   }
-  const risk = Number(config.deviationBpsThreshold);
-  const pause = Number(config.pauseBpsThreshold);
-  if (Number.isNaN(risk) || risk < 0 || Number.isNaN(pause) || pause < 0 || pause < risk) {
-    throw new Error("Config invalid: deviationBpsThreshold and pauseBpsThreshold must be 0 <= risk <= pause");
-  }
+  const shortHex = h.toString(16).padStart(8, "0");
+  return (`0x${shortHex.repeat(8)}`) as `0x${string}`;
 }
 
 function computeAction(deviationBps: number, config: Config): ActionType {
@@ -103,38 +67,15 @@ function computeAction(deviationBps: number, config: Config): ActionType {
   return "NO_ACTION";
 }
 
-function deterministicDecisionId(
-  receiver: string,
-  policyId: string,
-  signalValue: number,
-  actionType: string,
-  timestamp: number
-): string {
-  const payload = `${receiver}-${policyId}-${signalValue}-${actionType}-${timestamp}`;
-  let h = 0;
-  for (let i = 0; i < payload.length; i++) {
-    const c = payload.charCodeAt(i);
-    h = (h << 5) - h + c;
-    h = h & 0x7fffffff;
-  }
-  return `sf-${policyId}-${timestamp}-${Math.abs(h).toString(36).slice(0, 8)}`;
-}
-
 function randomSaltHex(bytes = 8): string {
-  try {
-    const cryptoObj = (globalThis as unknown as { crypto?: Crypto }).crypto;
-    if (cryptoObj?.getRandomValues) {
-      const arr = new Uint8Array(bytes);
-      cryptoObj.getRandomValues(arr);
-      return "0x" + Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
-    }
-  } catch {
-    // ignore
+  const arr = new Uint8Array(bytes);
+  const cryptoObj = (globalThis as unknown as { crypto?: Crypto }).crypto;
+  if (cryptoObj?.getRandomValues) {
+    cryptoObj.getRandomValues(arr);
+  } else {
+    for (let i = 0; i < bytes; i++) arr[i] = Math.floor(Math.random() * 256);
   }
-  let s = "0x";
-  for (let i = 0; i < bytes; i++)
-    s += Math.floor(Math.random() * 256).toString(16).padStart(2, "0");
-  return s;
+  return "0x" + Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function deterministicDecisionIdSalt(
@@ -154,164 +95,47 @@ function deterministicDecisionIdSalt(
   return `sf-${policyId}-${saltHex.slice(2, 10)}-${Math.abs(h).toString(36).slice(0, 8)}`;
 }
 
-function tryWriteIncident(decisionId: string, incident: Record<string, unknown>): string | null {
-  try {
-    const base =
-      typeof import.meta !== "undefined" && (import.meta as { dir?: string }).dir
-        ? (import.meta as { dir: string }).dir
-        : process.cwd();
-    const dir = path.join(base, "incidents");
-    fs.mkdirSync(dir, { recursive: true });
-    const safeId = decisionId.replace(/[^a-zA-Z0-9-_]/g, "_");
-    const outPath = path.join(dir, `${safeId}.json`);
-    fs.writeFileSync(outPath, JSON.stringify(incident, null, 2), "utf-8");
-    return outPath;
-  } catch {
-    return null;
-  }
+function applyGuardrail(
+  policyAction: ActionType,
+  aiAction: AiSuggestion["recommendedAction"],
+  aiPolicy: "DEESCALATE_ONLY" | "ADVISORY_ONLY"
+): ActionType {
+  if (aiPolicy === "ADVISORY_ONLY") return policyAction;
+  if (policyAction === "PAUSE") return aiAction === "NO_ACTION" ? "NO_ACTION" : aiAction === "SET_RISK_MODE" ? "SET_RISK_MODE" : "PAUSE";
+  if (policyAction === "SET_RISK_MODE") return aiAction === "NO_ACTION" ? "NO_ACTION" : "SET_RISK_MODE";
+  return "NO_ACTION";
 }
 
-async function readEthUsd(feedAddress: string, rpcUrl: string): Promise<number> {
-  const client = createPublicClient({
-    chain: baseSepolia,
-    transport: http(rpcUrl),
-  });
-  const [, answer] = await client.readContract({
-    address: feedAddress as `0x${string}`,
-    abi: AGGREGATOR_V3_ABI,
-    functionName: "latestRoundData",
-  });
-  return Number(answer);
-}
-
-function bpsDeviation(current: number, baseline: number): number {
-  if (baseline === 0) return 0;
-  const diff = Math.abs(current - baseline);
-  return Math.floor((diff * 10_000) / baseline);
-}
-
-const POLICY_ID = "SENTINELFLOW_POLICY_V0";
-const SIGNAL_TYPE = "PRICE_DEVIATION_BPS";
-
-const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Promise<string> => {
-  validateConfig(runtime.config);
+const onHttpTrigger = (runtime: Runtime<Config>, payload: HTTPPayload): string => {
   const config = runtime.config;
   const body = decodeJson(payload.input) as RequestBody;
-  const rpcUrl = process.env.BASE_SEPOLIA_RPC_URL ?? "https://sepolia.base.org";
-
-  const baseDir =
-    typeof import.meta !== "undefined" && (import.meta as { dir?: string }).dir
-      ? (import.meta as { dir: string }).dir
-      : process.cwd();
   const policyVersion = (config.policyVersion ?? "v0") as string;
-  let policy: Record<string, unknown>;
-  try {
-    policy = loadPolicyFile(baseDir, policyVersion);
-  } catch {
-    policy = {
-      policyId: POLICY_ID,
-      thresholds: { riskBps: config.deviationBpsThreshold, pauseBps: config.pauseBpsThreshold },
-      version: policyVersion,
-    };
-  }
+  const policy: Record<string, unknown> = {
+    policyId: POLICY_ID,
+    thresholds: { riskBps: config.deviationBpsThreshold, pauseBps: config.pauseBpsThreshold },
+    version: policyVersion,
+    guardrail: config.aiPolicy ?? "DEESCALATE_ONLY",
+  };
   const policyHash = computePolicyHash(policy);
 
-  let deviationBps = Number(body?.deviationBps ?? 0);
-  let meta: Record<string, unknown> = body?.meta ?? {};
-  let signalValue = deviationBps;
-
-  if (config.signalMode === "PRICE_FEED" && config.feedAddressEthUsd && config.baselinePriceUsd) {
-    const baseline = Number(config.baselinePriceUsd);
-    const current = await readEthUsd(config.feedAddressEthUsd, rpcUrl);
-    deviationBps = bpsDeviation(current, baseline);
-    signalValue = deviationBps;
-    meta = {
-      ...meta,
-      signalMode: "PRICE_FEED",
-      feed: config.feedAddressEthUsd,
-      baselinePriceUsd: baseline,
-      currentPriceUsd: current,
-    };
-  }
-
+  const deviationBps = Number(body?.deviationBps ?? 0);
+  const signalValue = deviationBps;
   const reason = String(body?.reason ?? "");
+  const meta: Record<string, unknown> = body?.meta ?? {};
+
   const actionType = computeAction(deviationBps, config);
   const executionMode = normalizeExecutionMode(config.executionMode);
   const aiPolicy = (config.aiPolicy ?? "DEESCALATE_ONLY") as "DEESCALATE_ONLY" | "ADVISORY_ONLY";
 
-  let ai: AiSuggestion | AiSuggestionLLM;
   const aiMode = (config.aiMode ?? "STUB") as "STUB" | "LLM" | "GATEWAY";
-  if (aiMode === "LLM") {
-    ai = await aiSuggestLLM({
-      deviationBps,
-      riskThreshold: Number(config.deviationBpsThreshold),
-      pauseThreshold: Number(config.pauseBpsThreshold),
-      signalType: SIGNAL_TYPE,
-      executionMode,
-      endpoint: config.aiEndpoint,
-      apiKey: process.env.OPENAI_API_KEY ?? process.env.AI_API_KEY,
-      model: config.aiModel,
-      timeoutMs: config.aiTimeoutMs,
-      maxTokens: config.aiMaxTokens,
-    });
-  } else if (aiMode === "GATEWAY" && config.aiEndpoint) {
-    const gatewayPayload = {
-      deviationBps,
-      riskThreshold: config.deviationBpsThreshold,
-      pauseThreshold: config.pauseBpsThreshold,
-      signalType: SIGNAL_TYPE,
-      executionMode,
-    };
-    const paid = await paidGatewayPost(config.aiEndpoint, gatewayPayload, (msg) => runtime.log(msg));
-    if (paid && paid.status === 200) {
-      ai = paid.data as AiSuggestionLLM;
-      if (paid.paymentResponseHeader) {
-        runtime.log("x402 settlement: PAYMENT-RESPONSE received from gateway");
-      }
-    } else if (paid && paid.status !== 200) {
-      runtime.log(`AI Gateway returned ${paid.status}; falling back to stub`);
-      ai = aiSuggest({
-        deviationBps,
-        riskThreshold: Number(config.deviationBpsThreshold),
-        pauseThreshold: Number(config.pauseBpsThreshold),
-        signalType: SIGNAL_TYPE,
-      });
-      (ai as AiSuggestionLLM).provider = "stub_fallback";
-      (ai as AiSuggestionLLM).latencyMs = 0;
-    } else {
-      const x402Token = process.env.X402_PAYMENT_TOKEN;
-      const res = await fetch(config.aiEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(x402Token ? { "PAYMENT-SIGNATURE": x402Token, "x402-payment": x402Token } : {}),
-        },
-        body: JSON.stringify(gatewayPayload),
-      });
-      if (!res.ok) {
-        if (res.status === 402) {
-          runtime.log("AI Gateway returned 402 Payment Required (x402); falling back to stub");
-        }
-        ai = aiSuggest({
-          deviationBps,
-          riskThreshold: Number(config.deviationBpsThreshold),
-          pauseThreshold: Number(config.pauseBpsThreshold),
-          signalType: SIGNAL_TYPE,
-        });
-        (ai as AiSuggestionLLM).provider = "stub_fallback";
-        (ai as AiSuggestionLLM).latencyMs = 0;
-      } else {
-        ai = (await res.json()) as AiSuggestionLLM;
-      }
-    }
-  } else {
-    ai = aiSuggest({
-      deviationBps,
-      riskThreshold: Number(config.deviationBpsThreshold),
-      pauseThreshold: Number(config.pauseBpsThreshold),
-      signalType: SIGNAL_TYPE,
-    });
-  }
+  const ai: AiSuggestionLLM = aiSuggest({
+    deviationBps,
+    riskThreshold: Number(config.deviationBpsThreshold),
+    pauseThreshold: Number(config.pauseBpsThreshold),
+    signalType: SIGNAL_TYPE,
+  });
+  ai.provider = aiMode === "STUB" ? "stub" : "stub_fallback";
+  ai.latencyMs = 0;
 
   const actionAfterGuardrail = applyGuardrail(actionType, ai.recommendedAction, aiPolicy);
   let finalActionType: ActionType = actionAfterGuardrail;
@@ -320,31 +144,13 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
     shadowAction = actionAfterGuardrail;
     finalActionType = "NO_ACTION";
   }
-  const setRiskMode = finalActionType === "SET_RISK_MODE";
-  const exceeded = actionType !== "NO_ACTION";
-
-  const aiLine = `AI: ${ai.recommendedAction} | severity=${ai.severity} | conf=${typeof ai.confidence === "number" ? ai.confidence.toFixed(2) : ai.confidence}${(ai as AiSuggestionLLM).provider ? ` | ${(ai as AiSuggestionLLM).provider}` : ""} | policy=${aiPolicy}`;
-  const finalReason = reason || (exceeded ? "threshold exceeded" : "within band");
 
   const saltHex = randomSaltHex(8);
+  const aiLine = `AI: ${ai.recommendedAction} | severity=${ai.severity} | conf=${ai.confidence} | ${ai.provider}`;
+  const finalReason = reason || (actionType !== "NO_ACTION" ? "threshold exceeded" : "within band");
   const reasonForLog = `${finalReason} | ${aiLine} | salt=${saltHex}`;
+  const decisionId = deterministicDecisionIdSalt(config.receiver, POLICY_ID, signalValue, actionAfterGuardrail, saltHex);
 
-  const decisionId = deterministicDecisionIdSalt(
-    config.receiver,
-    POLICY_ID,
-    signalValue,
-    actionAfterGuardrail,
-    saltHex
-  );
-
-  const metaOut: Record<string, unknown> = {
-    ...(Object.keys(meta).length ? meta : {}),
-    executionMode,
-    ...(shadowAction ? { shadowAction } : {}),
-    policyVersion,
-    policyHash,
-    salt: saltHex,
-  };
   const incidentBundle: Record<string, unknown> = {
     decisionId,
     policyId: POLICY_ID,
@@ -352,16 +158,13 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
     actionTypeAfterGuardrail: actionAfterGuardrail,
     actionTypeExecuted: finalActionType,
     ...(shadowAction ? { shadowAction } : {}),
-    exceeded,
+    exceeded: actionType !== "NO_ACTION",
     signal: { signalType: SIGNAL_TYPE, signalValue },
-    thresholds: {
-      risk: config.deviationBpsThreshold,
-      pause: config.pauseBpsThreshold,
-    },
+    thresholds: { risk: config.deviationBpsThreshold, pause: config.pauseBpsThreshold },
     policyVersion,
     policyHash,
     policySnapshot: policy,
-    meta: Object.keys(metaOut).length ? metaOut : null,
+    meta: Object.keys(meta).length ? meta : null,
     reason: reasonForLog,
     txHash: null,
     receiver: config.receiver,
@@ -369,17 +172,14 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
     createdAt: new Date().toISOString(),
     ai,
   };
-  const incidentPath = tryWriteIncident(decisionId, incidentBundle);
 
-  runtime.log(
-    `SentinelFlow: deviationBps=${deviationBps} reason=${reason} actionType=${actionType} actionAfterGuardrail=${actionAfterGuardrail} executionMode=${executionMode}${shadowAction ? ` shadowAction=${shadowAction}` : ""}${(ai as AiSuggestionLLM).provider ? ` ai=${(ai as AiSuggestionLLM).provider}` : ""}`
-  );
+  runtime.log(`SentinelFlow decision=${decisionId} action=${finalActionType}`);
 
   return JSON.stringify({
     decisionId,
     actionType: finalActionType,
-    setRiskMode,
-    exceeded,
+    setRiskMode: finalActionType === "SET_RISK_MODE",
+    exceeded: actionType !== "NO_ACTION",
     deviationBps,
     reason: reasonForLog,
     executionMode,
@@ -387,14 +187,22 @@ const onHttpTrigger = async (runtime: Runtime<Config>, payload: HTTPPayload): Pr
     policyVersion,
     policyHash,
     ai,
-    incidentPath,
-    incidentBundle: incidentPath ? { decisionId, path: incidentPath } : null,
+    incidentPath: null,
+    incidentBundle,
   });
 };
 
 const initWorkflow = (config: Config) => {
   const http = new HTTPCapability();
-  return [handler(http.trigger({}), onHttpTrigger)];
+  const publicKey = config.httpAuthorizedPublicKey ?? "0x04REPLACE_WITH_UNCOMPRESSED_ECDSA_PUBLIC_KEY";
+  return [
+    handler(
+      http.trigger({
+        authorizedKeys: [{ type: "KEY_TYPE_ECDSA_EVM", publicKey }],
+      }),
+      onHttpTrigger
+    ),
+  ];
 };
 
 export async function main() {
